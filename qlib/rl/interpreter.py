@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Generic, TypeVar
 
-import gym
+import gymnasium as gym
 import numpy as np
 from gym import spaces
 
