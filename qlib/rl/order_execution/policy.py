@@ -10,7 +10,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
-from gym.spaces import Discrete
+from gymnasium.spaces import Discrete
 from tianshou.data import Batch, ReplayBuffer, to_torch
 from tianshou.policy import BasePolicy, PPOPolicy, DQNPolicy
 
