@@ -206,26 +206,63 @@ class OnlineManager(Serializable):
             cur_time = D.calendar(freq=self.freq).max()
         self.cur_time = pd.Timestamp(cur_time)  # None for latest date
 
-        models_list = []
-        for strategy in self.strategies:
-            self.logger.info(f"Strategy `{strategy.name_id}` begins routine...")
+        self.logger.info("")
+        self.logger.info("=" * 80)
+        self.logger.info(f"[ROUTINE] Starting routine execution at {self.cur_time}")
+        self.logger.info(f"[ROUTINE] Status: {self.status}")
+        self.logger.info(f"[ROUTINE] Strategies to process: {len(self.strategies)}")
+        self.logger.info("=" * 80)
 
+        models_list = []
+        for idx, strategy in enumerate(self.strategies, 1):
+            self.logger.info("")
+            self.logger.info(f"[ROUTINE] [{idx}/{len(self.strategies)}] Processing strategy '{strategy.name_id}'")
+            self.logger.info("-" * 80)
+
+            # Step 1: Prepare tasks (check if new training needed)
+            self.logger.info(f"[ROUTINE] Step 1: Preparing tasks...")
             tasks = strategy.prepare_tasks(self.cur_time, **task_kwargs)
+
+            # Step 2: Train models
+            self.logger.info(f"[ROUTINE] Step 2: Training models ({len(tasks)} tasks)...")
             models = self.trainer.train(tasks, experiment_name=strategy.name_id)
             models_list.append(models)
-            self.logger.info(f"Finished training {len(models)} models.")
+            self.logger.info(f"[ROUTINE] Step 2 complete: Trained {len(models)} models")
+
+            # Step 3: Update online models
+            self.logger.info(f"[ROUTINE] Step 3: Updating online models...")
             online_models = strategy.prepare_online_models(models, **model_kwargs)
             self.history.setdefault(self.cur_time, {})[strategy] = online_models
+            self.logger.info(f"[ROUTINE] Step 3 complete: {len(online_models)} online models")
 
+            # Step 4: Update predictions (only in online mode)
             # The online model may changes in the above processes
             # So updating the predictions of online models should be the last step
             if self.status == self.STATUS_ONLINE:
+                self.logger.info(f"[ROUTINE] Step 4: Updating online predictions...")
                 strategy.tool.update_online_pred()
+                self.logger.info(f"[ROUTINE] Step 4 complete: Predictions updated")
+
+            self.logger.info("-" * 80)
+
+        self.logger.info("")
+        self.logger.info("=" * 80)
+        self.logger.info("[ROUTINE] Finalizing routine...")
 
         if not self._postpone_action():
+            # End training for all models
+            self.logger.info("[ROUTINE] Finalizing training for all models...")
             for strategy, models in zip(self.strategies, models_list):
                 models = self.trainer.end_train(models, experiment_name=strategy.name_id)
+
+            # Prepare signals
+            self.logger.info("[ROUTINE] Preparing signals...")
             self.prepare_signals(**signal_kwargs)
+
+        self.logger.info("=" * 80)
+        self.logger.info(f"[ROUTINE] Routine execution completed at {self.cur_time}")
+        self.logger.info("=" * 80)
+        self.logger.info("")
 
     def get_collector(self, **kwargs) -> MergeCollector:
         """
@@ -274,15 +311,53 @@ class OnlineManager(Serializable):
         Returns:
             pd.DataFrame: the signals.
         """
-        signals = prepare_func(self.get_collector()())
+        self.logger.info("=" * 80)
+        self.logger.info("[PREPARE_SIGNALS] Collecting predictions and preparing signals")
+        self.logger.info("=" * 80)
+
+        # Collect predictions from all strategies
+        collected_data = self.get_collector()()
+
+        # Log collection details
+        self.logger.info(f"[PREPARE_SIGNALS] Collected data from {len(collected_data)} strategies")
+        for strategy_key, pred in collected_data.items():
+            if isinstance(pred, pd.DataFrame) and not pred.empty:
+                pred_start = pred.index.get_level_values("datetime").min()
+                pred_end = pred.index.get_level_values("datetime").max()
+                pred_count = len(pred)
+                self.logger.info(f"  - Strategy '{strategy_key}': {pred_count} predictions, range: {pred_start} to {pred_end}")
+            else:
+                self.logger.info(f"  - Strategy '{strategy_key}': No data")
+
+        # Generate signals
+        signals = prepare_func(collected_data)
+
+        # Log signal generation details
+        if isinstance(signals, pd.DataFrame) and not signals.empty:
+            signal_start = signals.index.get_level_values("datetime").min()
+            signal_end = signals.index.get_level_values("datetime").max()
+            signal_count = len(signals)
+            self.logger.info(f"[PREPARE_SIGNALS] Generated {signal_count} signals, range: {signal_start} to {signal_end}")
+        else:
+            self.logger.info("[PREPARE_SIGNALS] No signals generated")
+
+        # Merge with existing signals
         old_signals = self.signals
         if old_signals is not None and not over_write:
             old_max = old_signals.index.get_level_values("datetime").max()
             new_signals = signals.loc[old_max:]
             signals = pd.concat([old_signals, new_signals], axis=0)
+            self.logger.info(f"[PREPARE_SIGNALS] Appended new signals to existing signals (old max: {old_max})")
         else:
             new_signals = signals
-        self.logger.info(f"Finished preparing new {len(new_signals)} signals.")
+            if over_write:
+                self.logger.info("[PREPARE_SIGNALS] Overwrote existing signals (over_write=True)")
+
+        self.logger.info(f"[PREPARE_SIGNALS] Total new signals: {len(new_signals) if hasattr(new_signals, '__len__') else 'N/A'}")
+        self.logger.info("=" * 80)
+        self.logger.info(f"[PREPARE_SIGNALS] Finished preparing signals")
+        self.logger.info("=" * 80)
+
         self.signals = signals
         return new_signals
 

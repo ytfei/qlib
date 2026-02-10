@@ -164,18 +164,60 @@ class OnlineToolR(OnlineTool):
             to_date (pd.Timestamp): the pred before this date will be updated. None for updating to latest time in Calendar.
             exp_name (str): the experiment name. If None, then use default_exp_name.
         """
+        import pandas as pd
+        from qlib.data import D
+
         exp_name = self._get_exp_name(exp_name)
         online_models = self.online_models(exp_name=exp_name)
+
+        self.logger.info("=" * 80)
+        self.logger.info(f"[UPDATE_ONLINE_PRED] Updating predictions for {len(online_models)} online models")
+        self.logger.info("=" * 80)
+
+        # Determine target date
+        latest_calendar_date = D.calendar(freq=self.default_exp_name and "day" or "day")[-1] if self.default_exp_name else D.calendar()[-1]
+        target_date = to_date if to_date is not None else latest_calendar_date
+        if target_date is None:
+            target_date = D.calendar()[-1]
+
+        self.logger.info(f"[UPDATE_ONLINE_PRED] Target update date: {target_date}")
+
         for rec in online_models:
             try:
+                # Get current prediction range
+                old_pred = rec.load_object("pred.pkl")
+                current_pred_end = old_pred.dropna().index.get_level_values("datetime").max()
+                pred_start = old_pred.dropna().index.get_level_values("datetime").min()
+
+                self.logger.info(f"[UPDATE_ONLINE_PRED] Model {rec.info['id'][:8]}...")
+                self.logger.info(f"  - Current prediction range: {pred_start} to {current_pred_end}")
+
+                # Check if update is needed
+                if current_pred_end >= target_date:
+                    self.logger.info(f"  - Status: UP TO DATE (prediction end {current_pred_end} >= target {target_date})")
+                    continue
+                else:
+                    self.logger.info(f"  - Status: NEEDS UPDATE (prediction end {current_pred_end} < target {target_date})")
+
                 updater = PredUpdater(rec, to_date=to_date, from_date=from_date)
+                updater.update()
+
+                # Log updated prediction range
+                updated_pred = rec.load_object("pred.pkl")
+                new_pred_end = updated_pred.dropna().index.get_level_values("datetime").max()
+                new_pred_count = len(updated_pred.loc[slice(target_date)])
+
+                self.logger.info(f"  - Updated prediction range: {pred_start} to {new_pred_end}")
+                self.logger.info(f"  - New predictions added: {new_pred_count} records")
+
             except LoadObjectError as e:
                 # skip the recorder without pred
-                self.logger.warn(f"An exception `{str(e)}` happened when load `pred.pkl`, skip it.")
+                self.logger.warn(f"[UPDATE_ONLINE_PRED] Model {rec.info['id'][:8]}... - FAILED: `{str(e)}`")
                 continue
-            updater.update()
 
-        self.logger.info(f"Finished updating {len(online_models)} online model predictions of {exp_name}.")
+        self.logger.info("=" * 80)
+        self.logger.info(f"[UPDATE_ONLINE_PRED] Completed updating {len(online_models)} online models")
+        self.logger.info("=" * 80)
 
     def _get_exp_name(self, exp_name):
         if exp_name is None:

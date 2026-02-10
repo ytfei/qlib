@@ -6,6 +6,9 @@ OnlineStrategy module is an element of online serving.
 """
 
 from typing import List, Union
+
+import pandas as pd
+
 from qlib.log import get_module_logger
 from qlib.model.ens.group import RollingGroup
 from qlib.utils import transform_end_date
@@ -179,13 +182,42 @@ class RollingStrategy(OnlineStrategy):
             self.logger.warn(f"No latest online recorders, no new tasks.")
             return []
         calendar_latest = transform_end_date(cur_time)
-        self.logger.info(
-            f"The interval between current time {calendar_latest} and last rolling test begin time {max_test[0]} is {self.ta.cal_interval(calendar_latest, max_test[0])}, the rolling step is {self.rg.step}"
-        )
+
+        # Enhanced logging for time management
+        interval = self.ta.cal_interval(calendar_latest, max_test[0])
+        self.logger.info("=" * 80)
+        self.logger.info(f"[PREPARE_TASKS] Time Management Analysis")
+        self.logger.info("=" * 80)
+        self.logger.info(f"[PREPARE_TASKS] Current routine time: {calendar_latest}")
+        self.logger.info(f"[PREPARE_TASKS] Last test begin time: {max_test[0]}")
+        self.logger.info(f"[PREPARE_TASKS] Time interval: {interval} days")
+        self.logger.info(f"[PREPARE_TASKS] Rolling step: {self.rg.step} days")
+
+        # Decision making
+        if interval < self.rg.step:
+            next_train_date = max_test[0] + pd.Timedelta(days=self.rg.step)
+            self.logger.info(f"[PREPARE_TASKS] Decision: NO NEW TASKS NEEDED")
+            self.logger.info(f"[PREPARE_TASKS] Reason: interval ({interval}) < step ({self.rg.step})")
+            self.logger.info(f"[PREPARE_TASKS] Next training required at: {next_train_date}")
+        else:
+            task_count = interval // self.rg.step
+            self.logger.info(f"[PREPARE_TASKS] Decision: NEW TASKS REQUIRED")
+            self.logger.info(f"[PREPARE_TASKS] Reason: interval ({interval}) >= step ({self.rg.step})")
+            self.logger.info(f"[PREPARE_TASKS] Estimated new tasks: ~{task_count}")
+
+        self.logger.info(f"The interval between current time {calendar_latest} and last rolling test begin time {max_test[0]} is {interval}, the rolling step is {self.rg.step}")
+
         res = []
         for rec in latest_records:
             task = rec.load_object("task")
             res.extend(self.rg.gen_following_tasks(task, calendar_latest))
+
+        if len(res) > 0:
+            self.logger.info(f"[PREPARE_TASKS] Generated {len(res)} new training tasks")
+        else:
+            self.logger.info(f"[PREPARE_TASKS] No new tasks generated")
+
+        self.logger.info("=" * 80)
         return res
 
     def _list_latest(self, rec_list: List[Recorder]):
