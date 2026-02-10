@@ -54,6 +54,7 @@ dependencies = [
   "pyarrow",
   "pydantic-settings",
   "setuptools-scm",
+  "gymnasium"
 ]
 
 [project.optional-dependencies]
