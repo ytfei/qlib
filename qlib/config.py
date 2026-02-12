@@ -31,7 +31,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class MLflowSettings(BaseSettings):
-    uri: str = "sqlite://" + str(Path(os.getcwd()).resolve() / "mlflow.db")
+    uri: str = "sqlite://mlflow.db"
     default_exp_name: str = "Experiment"
 
 
