@@ -3,9 +3,7 @@ name: Build Wheels
 on:
   push:
     branches:
-      - main
-      - master
-      - develop
+      - fintech
     tags:
       - 'v*'
   pull_request:
